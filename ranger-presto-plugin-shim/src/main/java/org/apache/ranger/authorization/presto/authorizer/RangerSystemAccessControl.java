@@ -50,6 +50,8 @@ public class RangerSystemAccessControl
             activatePluginClassLoader();
 
             rangerSystemAccessControl = cls.newInstance();
+
+            System.out.println("I HAVE HAPPILY LOADED MY CLASSES");
         }
         catch (Exception e) {
             System.out.println("ERRORRRRRRRR");

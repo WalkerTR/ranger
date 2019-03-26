@@ -39,7 +39,7 @@
         <dependency>
             <groupId>io.prestosql</groupId>
             <artifactId>presto-spi</artifactId>
-            <version>306</version>
+            <version>${presto.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.ranger</groupId>
