@@ -29,7 +29,7 @@ public class RangerSystemAccessControl
         implements SystemAccessControl
 {
     private static final String RANGER_PLUGIN_TYPE = "presto";
-    private static final String RANGER_PRESTO_AUTHORIZER_IMPL_CLASSNAME = "io.prestosql.ranger.RangerSystemAccessControl";
+    private static final String RANGER_PRESTO_AUTHORIZER_IMPL_CLASSNAME = "org.apache.ranger.authorization.presto.authorizer.RangerSystemAccessControl";
 
     private static RangerPluginClassLoader rangerPluginClassLoader;
     private SystemAccessControl rangerSystemAccessControl;
