@@ -116,7 +116,7 @@ public class RangerSystemAccessControl
 
   @Override
   public void checkCanRenameSchema(Identity identity, CatalogSchemaName schema, String newSchemaName) {
-    RangerPrestoResource res = createResource(schema.getCatalogName(), schema.getSchemaName())
+    RangerPrestoResource res = createResource(schema.getCatalogName(), schema.getSchemaName());
     if (!checkPermission(res, identity, PrestoAccessType.DROP)
       || !checkPermission(res, identity, PrestoAccessType.CREATE)) {
       AccessDeniedException.denyRenameSchema(schema.getSchemaName(), newSchemaName);
