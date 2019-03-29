@@ -21,20 +21,18 @@ import java.util.Map;
 import static java.util.Objects.requireNonNull;
 
 public class RangerSystemAccessControlFactory
-        implements SystemAccessControlFactory
-{
-    private static final String NAME = "ranger";
+  implements SystemAccessControlFactory {
+  private static final String NAME = "ranger";
 
-    @Override
-    public String getName()
-    {
-        return NAME;
-    }
+  @Override
+  public String getName() {
+    return NAME;
+  }
 
-    @Override
-    public SystemAccessControl create(Map<String, String> config)
-    {
-        requireNonNull(config, "config is null");
-        return new RangerSystemAccessControl();
-    }
+  @Override
+  public SystemAccessControl create(Map<String, String> config) {
+    requireNonNull(config, "config is null");
+
+    return new RangerSystemAccessControl();
+  }
 }
