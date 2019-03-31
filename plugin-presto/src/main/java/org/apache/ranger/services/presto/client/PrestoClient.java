@@ -1,18 +1,74 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 package org.apache.ranger.services.presto.client;
 
 import io.prestosql.spi.PrestoException;
+import org.apache.commons.io.FilenameUtils;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.ranger.plugin.client.BaseClient;
+import org.apache.ranger.plugin.client.HadoopException;
 
+import javax.security.auth.Subject;
 import java.io.Closeable;
+import java.security.PrivilegedAction;
 import java.sql.Connection;
 import java.sql.Driver;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLTimeoutException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 public class PrestoClient extends BaseClient implements Closeable {
+  private static final Log LOG = LogFactory.getLog(PrestoClient.class);
+
+  private static final String ERR_MSG = "You can still save the repository and start creating "
+    + "policies, but you would not be able to use autocomplete for "
+    + "resource names. Check ranger_admin.log for more info.";
+
   private Connection con;
+
+  public PrestoClient(String serviceName) throws Exception {
+    super(serviceName, null);
+    init();
+  }
+
+  public PrestoClient(String serviceName, Map<String, String> properties) throws Exception {
+    super(serviceName, properties);
+    init();
+  }
+
+  private void init() throws Exception {
+    Subject.doAs(getLoginSubject(), new PrivilegedAction<Void>() {
+      public Void run() {
+        initConnection();
+        return null;
+      }
+    });
+  }
 
   private void initConnection() {
     Properties prop = getConfigHolder().getRangerSection();
@@ -75,9 +131,415 @@ public class PrestoClient extends BaseClient implements Closeable {
     }
 
   }
-  
-  private List<String> getColumnList(java.lang.String columnNameMatching, List<String> catalogs,
-                                     List<String> dbs, List<String> tbls, List<String> cols) {
 
+  private List<String> getCatalogs(String needle, List<String> catalogs) throws HadoopException {
+    List<String> ret = new ArrayList<>();
+    if (con != null) {
+      PreparedStatement stat = null;
+      ResultSet rs = null;
+      String sql = null;
+
+      try {
+        if (needle != null && !needle.isEmpty()) {
+          sql = "SHOW CATALOGS LIKE ?";
+          stat = con.prepareStatement(sql);
+          stat.setString(1, needle);
+        } else {
+          sql = "SHOW CATALOGS";
+          stat = con.prepareStatement(sql);
+        }
+        rs = stat.executeQuery();
+        while (rs.next()) {
+          String catalogName = rs.getString(1);
+          if (catalogs != null && catalogs.contains(catalogName)) {
+            continue;
+          }
+          ret.add(catalogName);
+        }
+      } catch (SQLTimeoutException sqlt){
+        String msgDesc = "Time Out, Unable to execute SQL [" + sql
+          + "].";
+        HadoopException hdpException = new HadoopException(msgDesc,
+          sqlt);
+        hdpException.generateResponseDataMap(false, getMessage(sqlt),
+          msgDesc + ERR_MSG, null, null);
+      } catch (SQLException se) {
+        String msg = "Unable to execute SQL [" + sql + "]. ";
+        HadoopException he = new HadoopException(msg, se);
+        he.generateResponseDataMap(false, getMessage(se), msg + ERR_MSG,
+          null, null);
+        throw he;
+      } finally {
+        close(rs);
+        close(stat);
+      }
+    }
+    return ret;
+  }
+
+  public List<String> getCatalogList(String needle, final List<String> catalogs) throws HadoopException {
+    final String ndl = needle;
+    final List<String> catList = catalogs;
+
+    List<String> dbs = Subject.doAs(getLoginSubject(), new PrivilegedAction<List<String>>() {
+      @Override
+      public List<String> run() {
+        List<String> ret = null;
+        try {
+          ret = getCatalogs(ndl, catList);
+        } catch (HadoopException he) {
+          LOG.error("<== PrestoClient getCatalogList() :Unable to get the Database List", he);
+          throw he;
+        }
+        return ret;
+      }
+    });
+
+    return dbs;
+  }
+
+  private List<String> getSchemas(String needle, List<String> catalogs, List<String> schemas) throws HadoopException {
+    List<String> ret = new ArrayList<>();
+    if (con != null) {
+      PreparedStatement stat = null;
+      ResultSet rs = null;
+      String sql = "SHOW SCHEMAS FROM ?";
+
+      try {
+        if (catalogs != null && !catalogs.isEmpty()) {
+          for (String catalog : catalogs) {
+            try {
+              if (needle != null && !needle.isEmpty()) {
+                sql += " LIKE ?";
+                stat = con.prepareStatement(sql);
+                stat.setString(1, catalog);
+                stat.setString(2, needle);
+              } else {
+                stat = con.prepareStatement(sql);
+                stat.setString(1, catalog);
+              }
+
+              rs = stat.executeQuery();
+              while (rs.next()) {
+                String schema = rs.getString(1);
+                if (schemas != null && schemas.contains(schema)) {
+                  continue;
+                }
+                ret.add(schema);
+              }
+            } finally {
+              close(rs);
+              close(stat);
+              rs = null;
+              stat = null;
+            }
+          }
+        }
+      } catch (SQLTimeoutException sqlt) {
+        String msgDesc = "Time Out, Unable to execute SQL [" + sql
+          + "].";
+        HadoopException hdpException = new HadoopException(msgDesc,
+          sqlt);
+        hdpException.generateResponseDataMap(false, getMessage(sqlt),
+          msgDesc + ERR_MSG, null, null);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("<== PrestoClient.getSchemas() Error : ", sqlt);
+        }
+        throw hdpException;
+      } catch (SQLException sqle) {
+        String msgDesc = "Unable to execute SQL [" + sql + "].";
+        HadoopException hdpException = new HadoopException(msgDesc,
+          sqle);
+        hdpException.generateResponseDataMap(false, getMessage(sqle),
+          msgDesc + ERR_MSG, null, null);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("<== PrestoClient.getSchemas() Error : ", sqle);
+        }
+        throw hdpException;
+      }
+    }
+
+    return ret;
+  }
+
+  public List<String> getSchemaList(String needle, List<String> catalogs, List<String> schemas) throws HadoopException {
+    final String ndl = needle;
+    final List<String> cats = catalogs;
+    final List<String> shms = schemas;
+
+    List<String> schemaList = Subject.doAs(getLoginSubject(), new PrivilegedAction<List<String>>() {
+      @Override
+      public List<String> run() {
+        List<String> ret = null;
+        try {
+          ret = getSchemas(ndl, cats, shms);
+        } catch (HadoopException he) {
+          LOG.error("<== PrestoClient getSchemaList() :Unable to get the Schema List", he);
+        }
+        return ret;
+      }
+    });
+
+    return schemaList;
+  }
+
+  private List<String> getTables(String needle, List<String> catalogs, List<String> schemas, List<String> tables) throws HadoopException {
+    List<String> ret = new ArrayList<>();
+    if (con != null) {
+      PreparedStatement stat = null;
+      ResultSet rs = null;
+      String sql = "SHOW tables FROM ?.?";
+
+      if (catalogs != null && !catalogs.isEmpty()
+        && schemas != null && !schemas.isEmpty()) {
+        try {
+          for (String catalog : catalogs) {
+            for (String schema : schemas) {
+              try {
+                if (needle != null && !needle.isEmpty()) {
+                  sql += " LIKE ?";
+                  stat = con.prepareStatement(sql);
+                  stat.setString(1, catalog);
+                  stat.setString(2, schema);
+                  stat.setString(3, needle);
+                } else {
+                  stat = con.prepareStatement(sql);
+                  stat.setString(1, catalog);
+                  stat.setString(2, schema);
+                }
+
+                rs = stat.executeQuery();
+                while (rs.next()) {
+                  String table = rs.getString(1);
+                  if (tables != null && tables.contains(table)) {
+                    continue;
+                  }
+                  ret.add(table);
+                }
+              } finally {
+                close(rs);
+                close(stat);
+                rs = null;
+                stat = null;
+              }
+            }
+          }
+        } catch (SQLTimeoutException sqlt) {
+          String msgDesc = "Time Out, Unable to execute SQL [" + sql
+            + "].";
+          HadoopException hdpException = new HadoopException(msgDesc,
+            sqlt);
+          hdpException.generateResponseDataMap(false, getMessage(sqlt),
+            msgDesc + ERR_MSG, null, null);
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("<== PrestoClient.getTables() Error : ", sqlt);
+          }
+          throw hdpException;
+        } catch (SQLException sqle) {
+          String msgDesc = "Unable to execute SQL [" + sql + "].";
+          HadoopException hdpException = new HadoopException(msgDesc,
+            sqle);
+          hdpException.generateResponseDataMap(false, getMessage(sqle),
+            msgDesc + ERR_MSG, null, null);
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("<== PrestoClient.getTables() Error : ", sqle);
+          }
+          throw hdpException;
+        }
+      }
+    }
+    return ret;
+  }
+
+  public List<String> getTableList(String needle, List<String> catalogs, List<String> schemas, List<String> tables) throws HadoopException {
+    final String ndl = needle;
+    final List<String> cats = catalogs;
+    final List<String> shms = schemas;
+    final List<String> tbls = tables;
+
+    List<String> tableList = Subject.doAs(getLoginSubject(), new PrivilegedAction<List<String>>() {
+      @Override
+      public List<String> run() {
+        List<String> ret = null;
+        try {
+          ret = getTables(ndl, cats, shms, tbls);
+        } catch (HadoopException he) {
+          LOG.error("<== PrestoClient getTableList() :Unable to get the Column List", he);
+          throw he;
+        }
+        return ret;
+      }
+    });
+
+    return tableList;
+  }
+
+  private List<String> getColumns(String needle, List<String> catalogs, List<String> schemas, List<String> tables, List<String> columns) throws HadoopException {
+    List<String> ret = new ArrayList<>();
+    if (con != null) {
+      String regex = null;
+      ResultSet rs = null;
+      String sql = "SHOW COLUMNS FROM ?.?.?";
+      PreparedStatement stat = null;
+
+      if (needle != null && !needle.isEmpty()) {
+        regex = needle;
+      }
+
+      if (catalogs != null && !catalogs.isEmpty()
+        && schemas != null && !schemas.isEmpty()
+        && tables != null && !tables.isEmpty()) {
+        try {
+          for (String catalog : catalogs) {
+            for (String schema : schemas) {
+              for (String table : tables) {
+                try {
+                  stat = con.prepareStatement(sql);
+                  stat.setString(1, catalog);
+                  stat.setString(2, schema);
+                  stat.setString(3, table);
+
+                  rs = stat.executeQuery();
+                  while (rs.next()) {
+                    String column = rs.getString(1);
+                    if (columns != null && columns.contains(column)) {
+                      continue;
+                    }
+                    if (regex == null) {
+                      ret.add(column);
+                    } else if (FilenameUtils.wildcardMatch(column, regex)) {
+                      ret.add(column);
+                    }
+                  }
+                } finally {
+                  close(rs);
+                  close(stat);
+                  stat = null;
+                  rs = null;
+                }
+              }
+            }
+          }
+        } catch (SQLTimeoutException sqlt) {
+          String msgDesc = "Time Out, Unable to execute SQL [" + sql
+            + "].";
+          HadoopException hdpException = new HadoopException(msgDesc,
+            sqlt);
+          hdpException.generateResponseDataMap(false, getMessage(sqlt),
+            msgDesc + ERR_MSG, null, null);
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("<== PrestoClient.getColumns() Error : ", sqlt);
+          }
+          throw hdpException;
+        } catch (SQLException sqle) {
+          String msgDesc = "Unable to execute SQL [" + sql + "].";
+          HadoopException hdpException = new HadoopException(msgDesc,
+            sqle);
+          hdpException.generateResponseDataMap(false, getMessage(sqle),
+            msgDesc + ERR_MSG, null, null);
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("<== PrestoClient.getColumns() Error : ", sqle);
+          }
+          throw hdpException;
+        }
+      }
+    }
+    return ret;
+  }
+
+  public List<String> getColumnList(String needle, List<String> catalogs, List<String> schemas, List<String> tables, List<String> columns) throws HadoopException {
+    final String ndl = needle;
+    final List<String> cats = catalogs;
+    final List<String> shms = schemas;
+    final List<String> tbls = tables;
+    final List<String> cols = columns;
+
+    List<String> columnList = Subject.doAs(getLoginSubject(), new PrivilegedAction<List<String>>() {
+      @Override
+      public List<String> run() {
+        List<String> ret = null;
+        try {
+          ret = getColumns(ndl, cats, shms, tbls, cols);
+        } catch (HadoopException he) {
+          LOG.error("<== PrestoClient getColumnList() :Unable to get the Column List", he);
+          throw he;
+        }
+        return ret;
+      }
+    });
+    return columnList;
+  }
+
+  public static Map<String, Object> connectionTest(String serviceName,
+                                                   Map<String, String> connectionProperties)
+    throws Exception {
+    PrestoClient client = null;
+    Map<String, Object> resp = new HashMap<String, Object>();
+
+    boolean status = false;
+
+    List<String> testResult = null;
+
+    try {
+      client = new PrestoClient(serviceName, connectionProperties);
+      if (client != null) {
+        testResult = client.getCatalogList("*", null);
+        if (testResult != null && testResult.size() != 0) {
+          status = true;
+        }
+      }
+
+      if (status) {
+        String msg = "Connection test succesful";
+        generateResponseDataMap(status, msg, msg, null, null, resp);
+      }
+    } catch (Exception e) {
+      throw e;
+    } finally {
+      if (client != null) {
+        client.close();
+      }
+    }
+
+    return resp;
+  }
+
+  public void close() {
+    Subject.doAs(getLoginSubject(), new PrivilegedAction<Void>() {
+      public Void run() {
+        close(con);
+        return null;
+      }
+    });
+  }
+
+  private void close(Connection con) {
+    try {
+      if (con != null) {
+        con.close();
+      }
+    } catch (SQLException e) {
+      LOG.error("Unable to close Presto SQL connection", e);
+    }
+  }
+
+  public void close(Statement stat) {
+    try {
+      if (stat != null) {
+        stat.close();
+      }
+    } catch (SQLException e) {
+      LOG.error("Unable to close SQL statement", e);
+    }
+  }
+
+  public void close(ResultSet rs) {
+    try {
+      if (rs != null) {
+        rs.close();
+      }
+    } catch (SQLException e) {
+      LOG.error("Unable to close ResultSet", e);
+    }
   }
 }
