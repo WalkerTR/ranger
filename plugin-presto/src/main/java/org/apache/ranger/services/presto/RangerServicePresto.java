@@ -21,9 +21,11 @@ package org.apache.ranger.services.presto;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.ranger.plugin.client.HadoopException;
+import org.apache.ranger.plugin.model.RangerService;
+import org.apache.ranger.plugin.model.RangerServiceDef;
 import org.apache.ranger.plugin.service.RangerBaseService;
 import org.apache.ranger.plugin.service.ResourceLookupContext;
-import org.apache.ranger.services.presto.client.PrestoResourceManager;
+import org.apache.ranger.services.presto.client.PrestoClient;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,9 +35,17 @@ import java.util.Map;
 public class RangerServicePresto extends RangerBaseService {
   private static final Log LOG = LogFactory.getLog(RangerServicePresto.class);
 
+  PrestoClient prestoClient;
+
+  @Override
+  public void init(RangerServiceDef serviceDef, RangerService service) {
+    super.init(serviceDef, service);
+    prestoClient = null; // TODO
+  }
+
   @Override
   public Map<String, Object> validateConfig() throws Exception {
-    Map<String, Object> ret = new HashMap<String, Object>();
+    Map<String, Object> ret = new HashMap<>();
     String serviceName = getServiceName();
 
     if (LOG.isDebugEnabled()) {
@@ -45,33 +55,34 @@ public class RangerServicePresto extends RangerBaseService {
 
     if (configs != null) {
       try {
-        ret = PrestoResourceManager.connectionTest(serviceName, configs);
-      } catch (HadoopException he) {
-        LOG.error("<== RangerServicePresto.validateConfig Error:" + he);
-        throw he;
+
+      } catch (HadoopException e) {
+        LOG.error("<== RangerServicePresto.validateConfig Error:", e);
+        throw e;
       }
     }
 
     if (LOG.isDebugEnabled()) {
-      LOG.debug("RangerServicePresto.validateConfig(): Response: " +
-        ret);
+      LOG.debug("RangerServicePresto.validateConfig(): Response: " + ret);
     }
     return ret;
   }
 
+
+
   @Override
   public List<String> lookupResource(ResourceLookupContext context) throws Exception {
-
     List<String> ret 		   = new ArrayList<String>();
     String 	serviceName  	   = getServiceName();
     String	serviceType		   = getServiceType();
     Map<String,String> configs = getConfigs();
+
     if(LOG.isDebugEnabled()) {
       LOG.debug("==> RangerServiceHive.lookupResource Context: (" + context + ")");
     }
     if (context != null) {
       try {
-        ret  = PrestoResourceManager.getPrestoResources(serviceName, serviceType, configs,context);
+        //ret  = PrestoResourceManager.getPrestoResources(serviceName, serviceType, configs, context);
       } catch (Exception e) {
         LOG.error( "<==RangerServiceHive.lookupResource Error : " + e);
         throw e;

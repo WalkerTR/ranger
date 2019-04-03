@@ -43,6 +43,7 @@ public class RangerSystemAccessControl implements SystemAccessControl {
   private RangerBasePlugin rangerPlugin;
 
   public RangerSystemAccessControl(Map<String, String> config) {
+    super();
     String authType = config.getOrDefault("ranger.auth.type", "simple");
 
     if ("kerberos".equals(authType)) {
