@@ -22,6 +22,7 @@ import io.prestosql.spi.security.SystemAccessControl;
 import org.apache.ranger.plugin.classloader.RangerPluginClassLoader;
 
 import java.security.Principal;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -34,12 +35,7 @@ public class RangerSystemAccessControl
     private static RangerPluginClassLoader rangerPluginClassLoader;
     private SystemAccessControl rangerSystemAccessControl;
 
-    public RangerSystemAccessControl()
-    {
-        this.init();
-    }
-
-    private void init()
+    public RangerSystemAccessControl(Map<String, String> config)
     {
         try {
             rangerPluginClassLoader = RangerPluginClassLoader.getInstance(RANGER_PLUGIN_TYPE, this.getClass());
@@ -49,13 +45,11 @@ public class RangerSystemAccessControl
 
             activatePluginClassLoader();
 
-            rangerSystemAccessControl = cls.newInstance();
+            rangerSystemAccessControl = cls.getDeclaredConstructor(Map.class).newInstance(config);
 
             System.out.println("I HAVE HAPPILY LOADED MY CLASSES");
         }
         catch (Exception e) {
-            System.out.println("ERRORRRRRRRR");
-            System.out.println(e);
             throw new RuntimeException(e);
         }
         finally {

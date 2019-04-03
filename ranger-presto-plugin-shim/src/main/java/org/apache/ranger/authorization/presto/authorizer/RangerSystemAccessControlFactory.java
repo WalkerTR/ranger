@@ -33,6 +33,6 @@ public class RangerSystemAccessControlFactory
   public SystemAccessControl create(Map<String, String> config) {
     requireNonNull(config, "config is null");
 
-    return new RangerSystemAccessControl();
+    return new RangerSystemAccessControl(config);
   }
 }

@@ -21,15 +21,18 @@ import io.prestosql.spi.security.Identity;
 import io.prestosql.spi.security.PrestoPrincipal;
 import io.prestosql.spi.security.Privilege;
 import io.prestosql.spi.security.SystemAccessControl;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.ranger.plugin.policyengine.RangerAccessResult;
 import org.apache.ranger.plugin.service.RangerBasePlugin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.security.Principal;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -39,7 +42,23 @@ public class RangerSystemAccessControl implements SystemAccessControl {
 
   private RangerBasePlugin rangerPlugin;
 
-  public RangerSystemAccessControl() {
+  public RangerSystemAccessControl(Map<String, String> config) {
+    String authType = config.getOrDefault("ranger.auth.type", "simple");
+
+    if ("kerberos".equals(authType)) {
+      String principal = config.getOrDefault("ranger.auth.kerberos.principal", "");
+      String keytab = config.getOrDefault("ranger.auth.kerberos.keytab", "");
+
+      LOG.info("Performing kerberos login with principal " + principal + " and keytab " + keytab);
+
+      try {
+        UserGroupInformation.setConfiguration(new Configuration());
+        UserGroupInformation.loginUserFromKeytab(principal, keytab);
+      } catch (IOException e) {
+        LOG.error("Kerberos login failed", e);
+      }
+    }
+
     rangerPlugin = new RangerBasePlugin("presto", "presto");
     rangerPlugin.init();
   }
